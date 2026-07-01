@@ -5,10 +5,10 @@ Target-side feature extractor for the biosignal proxy. Companion to
 hci_features.py — it windows on the SAME grid (pass the `starts` array that
 hci_features.extract_session returned) so X[i] and Y[i] describe the same 30s.
 
-Per window it produces a ~12-dim biosignal feature vector:
+Per window it produces a ~13-dim biosignal feature vector:
   acc_movement, acc_jerk,
   hr_mean, hrv_rmssd,
-  eda_tonic_slope, eda_phasic_count,
+  eda_scl, eda_tonic_slope, eda_phasic_count,
   resp_bpm,
   eeg_theta_alpha, eeg_engagement, eeg_alpha_asym,
   fnirs_hbo_slope_L, fnirs_hbo_slope_R
@@ -31,7 +31,7 @@ from scipy.signal import welch, find_peaks, butter, filtfilt, detrend
 TARGET_NAMES = [
     "acc_movement", "acc_jerk",
     "hr_mean", "hrv_rmssd",
-    "eda_tonic_slope", "eda_phasic_count",
+    "eda_scl", "eda_tonic_slope", "eda_phasic_count",
     "resp_bpm",
     "eeg_theta_alpha", "eeg_engagement", "eeg_alpha_asym",
     "fnirs_hbo_slope_L", "fnirs_hbo_slope_R",
@@ -82,15 +82,16 @@ def f_ecg(t, ecg):
     return [float(hr), float(rmssd)]
 
 def f_eda(t, eda):
-    if len(t) < 50: return [np.nan, np.nan]
+    if len(t) < 50: return [np.nan, np.nan, np.nan]
     fs = _fs(t)
     b, a = butter(2, 0.05 / (fs / 2), btype="low")
     tonic = filtfilt(b, a, eda)
+    scl = float(np.mean(tonic))                 # NEW — mean tonic level
     slope = np.polyfit(t - t[0], tonic, 1)[0]
     phasic = eda - tonic
     pz = (phasic - phasic.mean()) / (phasic.std() + 1e-9)
     pk, _ = find_peaks(pz, prominence=0.5, distance=int(1.0 * fs))   # SCRs
-    return [float(slope), float(len(pk))]
+    return [scl, float(slope), float(len(pk))]   # CHANGED — scl added first
 
 def f_rip(t, rip):
     if len(t) < 50: return [np.nan]
@@ -177,15 +178,21 @@ def build_xy(subject_root: str, sid: str, source: str = "coglab",
              t_start=None, t_end=None, window_s=30.0, stride_s=15.0):
     """
     subject_root : path to one subject folder containing HCI/ and Biosignals/
-    Returns (X, Y, starts, x_names, y_names) with X and Y row-aligned.
+    Returns (X, swell_counts, Y, starts, x_names, swell_names, y_names),
+    with X, swell_counts, and Y all row-aligned.
     Pass t_start/t_end = the PB 'Task' window so behavior and physiology share a crop.
+
+    CHANGED: extract_session() now returns 3 values (X, swell_counts, starts)
+    instead of 2 — this function was still unpacking the old 2-value form,
+    which is what caused "too many values to unpack (expected 2)" on every
+    subject identically.
     """
     import hci_features as H
-    X, starts = H.extract_session(
+    X, swell_counts, starts = H.extract_session(                  # FIXED — 3 outputs now
         f"{subject_root}/HCI/D3_{sid}_mouse.csv",
         f"{subject_root}/HCI/D3_{sid}_keyboard.csv",
         source=source, t_start=t_start, t_end=t_end,
         window_s=window_s, stride_s=stride_s,
     )
     Y = extract_targets_session(f"{subject_root}/Biosignals", sid, starts, window_s)
-    return X, Y, starts, H.FEATURE_NAMES, TARGET_NAMES
+    return X, swell_counts, Y, starts, H.FEATURE_NAMES, H.SWELL_COUNT_NAMES, TARGET_NAMES  # FIXED

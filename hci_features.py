@@ -20,9 +20,45 @@ Canonical key code is consistent across sources:
 
 Output: per-window feature vector  [mouse_features | keyboard_features].
 Window: WINDOW_S / STRIDE_S (default 30 / 15), fully parameterized.
+
+--------------------------------------------------------------------------------
+NEW (Phase 0 — SWELL-KW gate test): extract_session() now ALSO returns a second
+per-window feature block — SWELL-KW-equivalent counts (SWELL_COUNT_NAMES) —
+computed inside the SAME windowing loop as the original kinematic features.
+This guarantees the two feature sets share identical window boundaries by
+construction, with zero extra alignment work.
+
+CONFIRMED — click-type event vocabulary (verified against real data):
+  df['type'].unique() == ['Mouse Down','Mouse Move','Mouse Up','Left Click',
+                           'Mouse Wheel','Page Scroll']
+Right-click, double-click, and drag are NOT logged event types in Cog Lab —
+they are not "zero", they are structurally unmeasurable, so
+SnRightClicked/SnDoubleClicked/SnDragged are always np.nan here, matching
+the SnAppChange/SnTabfocusChange treatment.
+
+OPEN QUESTION — possible double-count between 'Mouse Down' and 'Left Click':
+load_mouse()'s existing is_click logic (unchanged, pre-existing) treats
+both 'Mouse Down' and 'Left Click' as a click event:
+    is_click = etype in ("Mouse Down", "Left Click")
+If a single physical click ever produces BOTH a 'Mouse Down' row AND a
+separate 'Left Click' row (e.g. one logged by a low-level hook, one by a
+higher-level synthesized event), SnLeftClicked here would count it twice.
+Verify before trusting SnLeftClicked or ms_click_rate:
+    df = pd.read_csv("D3_S1_mouse.csv")
+    # check whether Mouse Down and Left Click rows share timestamps:
+    print(df[df["type"].isin(["Mouse Down","Left Click"])]
+          .sort_values("time").head(20))
+If they're always paired at the same timestamp, divide left-click counts
+by 2, or pick only one label, before using SnLeftClicked downstream.
+--------------------------------------------------------------------------------
 """
 
 from __future__ import annotations
+from __future__ import annotations   # FIX — same Python 3.8 compatibility
+                                       # issue as build_phase0_dataset.py:
+                                       # tuple[...] generic syntax below
+                                       # needs this on Python < 3.9.
+
 import json
 import numpy as np
 import pandas as pd
@@ -95,7 +131,12 @@ def load_keyboard(path: str, source: str) -> tuple[np.ndarray, np.ndarray]:
 def load_mouse(path: str, source: str) -> dict:
     """
     Return canonical mouse arrays with RECOMPUTED kinematics (source speed ignored).
-    Keys: t, x, y, dx, dy, speed, is_click  (all length N, time-sorted).
+    Keys: t, x, y, dx, dy, speed, is_click, etype  (all length N, time-sorted).
+
+    NEW: `etype` (the raw event-type string, e.g. "Mouse Down", "Left Click")
+    is now preserved and sorted alongside the rest, so window-level click-type
+    breakdown (left/right/double/scroll/drag) is possible downstream. It was
+    previously discarded right after computing is_click.
     """
     df = pd.read_csv(path)
     if source == "coglab":
@@ -114,7 +155,7 @@ def load_mouse(path: str, source: str) -> dict:
         raise ValueError(source)
 
     order = np.argsort(t)
-    t, x, y, is_click = t[order], x[order], y[order], is_click[order]
+    t, x, y, is_click, etype = t[order], x[order], y[order], is_click[order], etype[order]  # CHANGED — etype added
 
     n  = len(t)
     dx = np.zeros(n); dy = np.zeros(n); speed = np.zeros(n)
@@ -123,7 +164,7 @@ def load_mouse(path: str, source: str) -> dict:
         dx[1:] = np.diff(x)
         dy[1:] = np.diff(y)
         speed[1:] = np.sqrt(dx[1:] ** 2 + dy[1:] ** 2) / dt
-    return dict(t=t, x=x, y=y, dx=dx, dy=dy, speed=speed, is_click=is_click)
+    return dict(t=t, x=x, y=y, dx=dx, dy=dy, speed=speed, is_click=is_click, etype=etype)  # CHANGED — etype added
 
 
 # ============================================================ keyboard window features
@@ -195,6 +236,84 @@ def mouse_window_features(m: dict, idx: np.ndarray, win_dur: float) -> np.ndarra
     return f
 
 
+# ===================================================== NEW: SWELL-KW-style window counts
+SWELL_COUNT_NAMES = [
+    "SnKeyStrokes", "SnChars", "SnSpecialKeys", "SnDirectionKeys",
+    "SnErrorKeys", "SnShortcutKeys", "SnSpaces",
+    "CharactersRatio", "ErrorKeyRatio",
+    "SnLeftClicked", "SnRightClicked", "SnDoubleClicked",
+    "SnWheel", "SnDragged", "SnMouseDistance", "SnMouseAct",
+]
+# NOTE: SWELL-KW has 18 columns total. SnAppChange / SnTabfocusChange are
+# DELIBERATELY excluded here, not just zeroed — Cog Lab's single passive
+# task has no app-switching signal at all (confirmed earlier: "SWELL-KW...
+# includes app-switching which Cog Lab had zero of"). If you need to pad
+# to exactly 18 columns to match SWELL-KW's column order elsewhere, append
+# two np.nan columns for those, never 0.
+
+_SPECIAL_KEYS_SWELL = {8, 9, 13, 27, 32, 45, 46}
+_DIRECTION_KEYS_SWELL = {37, 38, 39, 40}
+
+def swell_count_features(
+    mt: np.ndarray, mx: np.ndarray, my: np.ndarray, metype: np.ndarray,
+    kt_w: np.ndarray, kc_w: np.ndarray, win_dur: float
+) -> np.ndarray:
+    """
+    Computes the 16 SWELL-KW-equivalent count features for one window.
+    Called from inside extract_session()'s existing loop — mt/mx/my/metype
+    and kt_w/kc_w are already sliced to this window by the caller.
+    """
+    f = np.zeros(len(SWELL_COUNT_NAMES), dtype=np.float32)
+    if win_dur <= 0:
+        return f
+
+    # ---- keyboard ----
+    n_keys = len(kt_w)
+    if n_keys > 0:
+        backspace = int((kc_w == 8).sum())
+        special   = int(np.isin(kc_w, list(_SPECIAL_KEYS_SWELL)).sum())
+        direction = int(np.isin(kc_w, list(_DIRECTION_KEYS_SWELL)).sum())
+        shortcut  = int(((kc_w < 32) & ~np.isin(kc_w, list(_SPECIAL_KEYS_SWELL))).sum())
+        spaces    = int((kc_w == 32).sum())
+        printable = int(((kc_w > 32) & (kc_w < 127) &
+                         ~np.isin(kc_w, list(_SPECIAL_KEYS_SWELL))).sum())
+    else:
+        backspace = special = direction = shortcut = spaces = printable = 0
+    chars_ratio = printable / max(n_keys, 1)
+    error_ratio = backspace / max(n_keys, 1)
+
+    # ---- mouse: click-type breakdown from raw event-type strings ----
+    # CONFIRMED against actual Cog Lab data (df['type'].unique() ==
+    # ['Mouse Down','Mouse Move','Mouse Up','Left Click','Mouse Wheel',
+    # 'Page Scroll']). Right-click, double-click, and drag DO NOT EXIST
+    # as event types in this dataset — they are not "zero", they are
+    # structurally unmeasurable, so they are np.nan, matching the
+    # SnAppChange/SnTabfocusChange treatment elsewhere in this file.
+    if len(metype) > 0:
+        left  = int(np.sum(np.isin(metype, ["Mouse Down", "Left Click"])))
+        wheel = int(np.sum(np.isin(metype, ["Mouse Wheel", "Page Scroll"])))
+    else:
+        left = wheel = 0
+    right  = np.nan   # not a logged event type in Cog Lab
+    double = np.nan   # not a logged event type in Cog Lab
+    drag   = np.nan   # not a logged event type in Cog Lab
+
+    if len(mt) > 1:
+        dxy = np.sqrt(np.diff(mx) ** 2 + np.diff(my) ** 2)
+        distance = float(dxy.sum())
+        gaps = np.diff(mt)
+        active_seconds = float((gaps < 2.0).sum())
+        mouse_act = active_seconds / win_dur
+    else:
+        distance = 0.0
+        mouse_act = 0.0
+
+    f[:] = [n_keys, printable, special, direction, backspace, shortcut, spaces,
+            chars_ratio, error_ratio,
+            left, right, double, wheel, drag, distance, mouse_act]
+    return f
+
+
 # ===================================================================== session windows
 FEATURE_NAMES = MOUSE_FEATURES + KB_FEATURES
 
@@ -206,14 +325,19 @@ def extract_session(
     t_end: float | None = None,
     window_s: float = WINDOW_S,
     stride_s: float = STRIDE_S,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Slide aligned windows over one session; return (X, starts).
-      X      : (n_windows, len(FEATURE_NAMES))  float32
-      starts : (n_windows,) window start timestamps
+    Slide aligned windows over one session; return (X, swell_counts, starts).
+      X            : (n_windows, len(FEATURE_NAMES))       float32 — original kinematic features
+      swell_counts : (n_windows, len(SWELL_COUNT_NAMES))   float32 — NEW SWELL-KW-equivalent counts
+      starts       : (n_windows,) window start timestamps
 
     t_start / t_end: crop to the common biosignal window (PB 'Task' span). If None,
     uses the overlap of the mouse+keyboard streams.
+
+    CHANGED: now returns 3 values instead of 2. Any caller doing
+    `X, starts = extract_session(...)` needs updating to
+    `X, swell_counts, starts = extract_session(...)`.
     """
     m = load_mouse(mouse_path, source)
     kt, kc = load_keyboard(kb_path, source)
@@ -221,7 +345,7 @@ def extract_session(
     lo = max(m["t"].min(), kt.min()) if t_start is None else t_start
     hi = min(m["t"].max(), kt.max()) if t_end   is None else t_end
 
-    rows, starts = [], []
+    rows, swell_rows, starts = [], [], []
     ws = lo
     while ws + window_s <= hi:
         we = ws + window_s
@@ -231,11 +355,17 @@ def extract_session(
             mouse_window_features(m, m_idx, window_s),
             keyboard_window_features(kt[k_sel], kc[k_sel], window_s),
         ])
-        rows.append(feats); starts.append(ws)
+        swell_feats = swell_count_features(                          # NEW
+            m["t"][m_idx], m["x"][m_idx], m["y"][m_idx], m["etype"][m_idx],
+            kt[k_sel], kc[k_sel], window_s,
+        )
+        rows.append(feats); swell_rows.append(swell_feats); starts.append(ws)
         ws += stride_s
 
     X = np.array(rows, dtype=np.float32) if rows else np.empty((0, len(FEATURE_NAMES)), np.float32)
-    return X, np.array(starts)
+    SC = (np.array(swell_rows, dtype=np.float32) if swell_rows
+          else np.empty((0, len(SWELL_COUNT_NAMES)), np.float32))
+    return X, SC, np.array(starts)
 
 
 def per_user_zscore(X: np.ndarray) -> np.ndarray:
