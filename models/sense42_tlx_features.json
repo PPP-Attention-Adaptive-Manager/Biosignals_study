@@ -1,0 +1,23 @@
+[
+  "SnMouseAct",
+  "SnLeftClicked",
+  "SnRightClicked",
+  "SnDoubleClicked",
+  "SnWheel",
+  "SnDragged",
+  "SnMouseDistance",
+  "SnKeyStrokes",
+  "SnChars",
+  "SnSpecialKeys",
+  "SnDirectionKeys",
+  "SnErrorKeys",
+  "SnShortcutKeys",
+  "SnSpaces",
+  "SnAppChange",
+  "SnTabfocusChange",
+  "CharactersRatio",
+  "ErrorKeyRatio",
+  "SnKeyStrokes_std",
+  "SnMouseDistance_std",
+  "SnAppChange_std"
+]

@@ -1,0 +1,56 @@
+{
+  "hci_schema": [
+    "SnMouseAct",
+    "SnLeftClicked",
+    "SnRightClicked",
+    "SnDoubleClicked",
+    "SnWheel",
+    "SnDragged",
+    "SnMouseDistance",
+    "SnKeyStrokes",
+    "SnChars",
+    "SnSpecialKeys",
+    "SnDirectionKeys",
+    "SnErrorKeys",
+    "SnShortcutKeys",
+    "SnSpaces",
+    "SnAppChange",
+    "SnTabfocusChange",
+    "CharactersRatio",
+    "ErrorKeyRatio"
+  ],
+  "default_active_targets": [
+    "HR",
+    "RMSSD"
+  ],
+  "flagged_excluded_targets": [
+    "SCL",
+    "RMSSD_magnitude"
+  ],
+  "flagged_target_warnings": {
+    "SCL_rising": "50.3% accuracy, at chance. Adding SCL as a 4th CCA target dropped CV r from 0.581 to 0.497. Model saved for future revisit at longer aggregation windows (SCL moves on a 1-3 min timescale) but must NOT be wired into the aux head as-is.",
+    "RMSSD_magnitude": "~33% true-LOSO accuracy, exact chance for a balanced 3-class problem. Previously cited as 84.7%/69.9% -- both were artifacts of a NaN-handling bug where missing RMSSD deltas leaked past dropna() and got force-assigned to the 'rising' bin by np.digitize(), manufacturing a 74% class skew that a classifier then exploited. Fixed and re-measured; do not cite 84.7% or 69.9% again. Model saved in case a different window/feature set recovers real signal, but NOT a default-active target."
+  },
+  "cca_cv_r_mean": 0.5491866146149892,
+  "cca_cv_r_std": 0.20894181480654675,
+  "direction_accuracies": {
+    "HR_rising": 0.5863695436556985,
+    "RMSSD_rising": 0.4634259050047861,
+    "SCL_rising": 0.4934001591242554,
+    "RMSSD_magnitude": 0.3291627789082421
+  },
+  "reference_swellkw_numbers": {
+    "cca_cv_r": 0.581,
+    "hr_direction": 0.79,
+    "rmssd_direction": 0.775,
+    "rmssd_magnitude_AT_CHANCE_see_warning": 0.33,
+    "scl_direction_AT_CHANCE": 0.503
+  },
+  "not_included_confirmed_null": [
+    "HCI -> EEG (any config, see SENSE-42 investigation)",
+    "HCI -> resp_bpm on naturalistic non-contrasted data",
+    "Task-identity -> EEG contrasts",
+    "RMSSD_magnitude (see flagged_target_warnings -- confirmed chance-level once a NaN-handling bug is fixed)"
+  ],
+  "training_design_note": "CCA trained on CONDITION-LEVEL aggregates (participant x condition mean), not per-minute windows. This design choice is what produces CV r=0.581 -- collapsing to condition-level means is what exposes the induced-load signal. Direction classifiers use per-minute DELTA features with true per-participant LOSO (not GroupKFold(10), which was a coarser, different validation scheme silently mislabeled as 'LOSO-style' in an earlier version of this script)."
+}

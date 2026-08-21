@@ -1,2 +1,7 @@
-cog_lab/
-swell-kw/
+
+data/
+output/
+
+reorganize_biosignals.sh
+overnight.log
+fix_paths.sh
