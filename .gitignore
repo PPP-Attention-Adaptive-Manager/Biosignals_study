@@ -1,6 +1,6 @@
 
 data/
-output/
+outputs/
 
 reorganize_biosignals.sh
 overnight.log
