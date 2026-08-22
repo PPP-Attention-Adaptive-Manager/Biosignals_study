@@ -9,7 +9,93 @@ use them** — they're kept only as a record of what was tried and ruled out.
 
 ---
 
-## What this actually is now
+## Full Architecture Recap
+
+```
+                          ┌─────────────────────┐
+                          │   session_router.py   │
+                          │  (decides which expert │
+                          │   fires, if any)        │
+                          └──────────┬───────────┘
+                                    │
+        ┌───────────────┬──────────┼──────────┬────────────────┐
+        │                │                    │                │
+   single_task      multi_task        EEG calibration   interruption
+        │                │              available            present
+        ▼                ▼                    ▼                ▼
+  coglab_expert    sense42_prior       clare_expert      no_expert_available
+   (HCI-only,      (categorical         (needs REAL         (confirmed null,
+    REAL, ready)    lookup, needs        EEG input,           see below)
+                    known task ID)       REAL, ready)
+```
+
+Plus a **personalization layer** (warm-start for returning users) — designed
+into `SessionContext`/`PersonalizationStatus` but permanently `is_active=False`
+until multi-session-per-user AAM data exists to validate a leave-one-session-out
+model against. Currently every user is treated as cold-start, the only
+scenario any expert has actually been validated for.
+
+### Expert 1 — `coglab_expert` (the one that matters for BEHACOM)
+
+| | |
+|---|---|
+| **Fires when** | single sustained task, minimal window switching |
+| **Input** | 13-column HCI count deltas (window-to-window change) — `SnKeyStrokes, SnChars, SnSpecialKeys, SnDirectionKeys, SnErrorKeys, SnShortcutKeys, SnSpaces, CharactersRatio, ErrorKeyRatio, SnLeftClicked, SnWheel, SnMouseDistance, SnMouseAct` |
+| **Output** | `acc_jerk_direction` (2-class), `acc_jerk_magnitude` (3-class), `eeg_engagement_direction` (2-class) |
+| **Validated on** | Cog Lab, N=16 (S1,S3-S16,S18 — S2 excluded: no HCI folder; S17 excluded: confirmed byte-identical duplicate of S1, verified via `diff`) |
+| **Method** | True per-participant `LeaveOneGroupOut`, empirical chance, permutation control |
+| **Results** | `acc_jerk_direction`: acc=0.697, chance=0.526, **over=+0.171**. `acc_jerk_magnitude`: acc=0.659, chance=0.481, **over=+0.178**. `eeg_engagement_direction`: acc=0.612, chance=0.526, **over=+0.086** |
+| **Note** | A richer input (real keyboard-LSTM + mouse-stats encoder embeddings, 86-dim) was built and head-to-head tested against this flat baseline — **the baseline won on every target**. Use the flat counts, not the encoder pipeline. |
+
+### Expert 2 — `sense42_prior` (categorical lookup, not a trained model)
+
+| | |
+|---|---|
+| **Fires when** | multi-task session, task identity known |
+| **Input** | task label only (`file_mgr`, `mail`, `notes`, `browser`, `trash`) — **never inferred from HCI** |
+| **Output** | expected cardiac-locked EEG amplitude bias (z-scored) for that task |
+| **Validated on** | SENSE-42, N=34-40, confound-safe rewindowed (R-R interval check ruled out tachycardia-into-next-QRS artifact) |
+| **Results** | `file_mgr vs mail`: d=+0.44, p=0.018*. `notes vs browser`: d=-0.52, p=0.006**. `notes vs mail`: d=-0.03, p=0.88 — correctly returns "no difference," not omitted |
+| **Note** | Chaining this into an HCI-predictable form was tested and failed the redundancy check (adding HCI features on top of app-identity made prediction *worse*, gap=-0.046) — task identity itself carries the signal, not something to re-derive from behavior. **Not applicable to BEHACOM** — its task taxonomy won't map onto SENSE-42's specific 5 categories. |
+
+### Expert 3 — `clare_expert` (needs real EEG, structurally can't run on HCI alone)
+
+| | |
+|---|---|
+| **Fires when** | real EEG calibration reading present (`engagement_index` computed from actual EEG) |
+| **Input** | `engagement_index` (real EEG) + `hr_mean`, `hrv_rmssd` (ECG) + `eda_tonic_mean`, `eda_tonic_slope` (EDA) |
+| **Output** | `log_frontal_alpha`, `frontal_theta_alpha_ratio` — **`frontal_theta` deliberately excluded** (R²=0.887-0.890 in testing, mostly circular since `engagement_index = beta/(alpha+theta)` shares theta in its own denominator) |
+| **Validated on** | CLARE, N=19, true LOSO |
+| **Results** | `log_frontal_alpha`: R²=0.129 (up from 0.057 engagement-alone — real improvement from adding ECG/EDA). `frontal_theta_alpha_ratio`: R²=0.349 |
+| **Note** | Both confirmed clean against a temporal-site (TP9/TP10) control — no target there crossed significance. **Not applicable to BEHACOM** — no EEG exists in that dataset at all. |
+
+### The interruption branch — confirmed null, not a gap
+
+Four independent tests, all converging on the same answer:
+1. HCI→cardio/skin (SWELL-KW): `HR_rising` 0.790 vs true chance 0.820, `RMSSD_rising` 0.775 vs 0.801 — **both below chance**
+2. HCI→CCA properly grouped: r=0.225, doesn't clear permutation *at this sample size* — see reframed note below
+3. HCI→resp_bpm chain: confirmed no improvement over HCI-alone baseline
+4. HCI→interruption condition, direct, no biosignal step (3-class and binary): both match permutation
+
+`session_router.py` correctly returns `no_expert_available` for interruption-present sessions.
+
+### On the CCA specifically — reframed, not simply "null"
+
+A power analysis (triggered by checking a literature claim that r=0.15–0.30 is
+typical for this kind of relationship) found our SWELL-KW sample (N=19-25) had
+only **~27% power to detect r=0.30** and **~9-11% power to detect r=0.15** — the
+field-typical range. The honest statement is **not** "confirmed no relationship,"
+it's: *"statistically indistinguishable from permuted noise at this sample size;
+underpowered to detect a field-typical small effect; would need N≥85-150 for a
+conclusive test."* Still not deployed — a real-but-unconfirmed small effect and
+an actually-null effect look identical at this N, and CCA's own instability
+(SD=0.263 on a mean of 0.225) is a separate reliability problem regardless of the
+population-level answer. Flagged here as an open question for future work with
+adequate sample size, not a closed dead end.
+
+---
+
+
 
 Not one proxy — a **router + three independent experts**, each trained
 on the dataset it's structurally suited to, each activated only under
@@ -136,7 +222,7 @@ result = apply_expert(decision, hci_delta_vector=your_zscored_13dim_vector)
 | `RMSSD_rising` (SWELL-KW) | 0.775 vs true chance 0.801 | **Below chance** |
 | `RMSSD_magnitude` (SWELL-KW) | 0.329 vs chance 0.333 | Exact chance |
 | `SCL_rising` (SWELL-KW) | ~0.49-0.52 vs chance 0.50 | Exact chance |
-| CCA (SWELL-KW, properly grouped) | r=0.225 | Does not clear permutation null [-0.296, +0.378] |
+| CCA (SWELL-KW, properly grouped) | r=0.225, N=19-25, ~9-27% power | **Reframed**: underpowered, not confirmed null — see architecture section above |
 | `resp_bpm` (Cog Lab, direction+mag) | Both flagged | Confirmed false positive — real chance was 0.847, not the assumed 0.50 |
 | HCI→interruption condition (SWELL-KW, direct) | 3-class and binary both tested | Both match permutation — confirmed null |
 | `eeg_theta_alpha`, `eeg_alpha_asym`, `fnirs_hbo_slope_L/R` (Cog Lab) | All negligible or below chance | Never cleared the bar |
