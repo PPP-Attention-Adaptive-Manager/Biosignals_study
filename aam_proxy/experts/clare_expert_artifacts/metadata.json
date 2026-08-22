@@ -1,0 +1,35 @@
+{
+  "predictors": [
+    "frontal_engagement_index",
+    "hr_mean",
+    "hrv_rmssd",
+    "eda_tonic_mean",
+    "eda_tonic_slope"
+  ],
+  "targets": {
+    "log_frontal_alpha": {
+      "loso_r2": 0.12916227665679247,
+      "n_folds": 19
+    },
+    "frontal_theta_alpha_ratio": {
+      "loso_r2": 0.3488244809098117,
+      "n_folds": 19
+    }
+  },
+  "train_mu": [
+    0.27390808211275264,
+    75.8775067196335,
+    105.5673276182185,
+    4.5164949614661385,
+    -8.535294571949636e-06
+  ],
+  "train_sd": [
+    0.16799704108380847,
+    15.091823570989481,
+    111.97727278414085,
+    3.0122978761027754,
+    0.00011053281007463144
+  ],
+  "requires_real_eeg_calibration": true,
+  "excluded_target": "log_frontal_theta -- R2=0.887-0.890 in testing, mostly circular (engagement_index shares theta in its own denominator)"
+}

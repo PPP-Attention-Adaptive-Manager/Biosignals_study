@@ -1,0 +1,47 @@
+{
+  "task_amplitude_z": {
+    "browser": {
+      "mean": 0.271923040748519,
+      "std": 0.7230726992162417,
+      "n": 33
+    },
+    "file_mgr": {
+      "mean": 0.31720533045270216,
+      "std": 0.7946082708577231,
+      "n": 32
+    },
+    "mail": {
+      "mean": -0.32266094636134846,
+      "std": 0.8483025224788009,
+      "n": 34
+    },
+    "notes": {
+      "mean": -0.5047860431213171,
+      "std": 0.7459553611249308,
+      "n": 34
+    },
+    "trash": {
+      "mean": 0.33367284160085375,
+      "std": 1.0136827705874594,
+      "n": 27
+    }
+  },
+  "validated_contrasts": {
+    "file_mgr_vs_mail": {
+      "d": 0.44,
+      "p": 0.018,
+      "direction": "file_mgr_higher"
+    },
+    "notes_vs_browser": {
+      "d": -0.52,
+      "p": 0.006,
+      "direction": "browser_higher"
+    },
+    "notes_vs_mail": {
+      "d": -0.03,
+      "p": 0.88,
+      "direction": "no_difference"
+    }
+  },
+  "usage_note": "This is a PRIOR, not a per-window prediction. Given known task identity (from AAM's router, not inferred from HCI), look up task_amplitude_z[task]['mean'] as the EXPECTED cardiac-locked EEG amplitude bias for that task, relative to that person's own session-mean. Only file_mgr/mail and notes/browser contrasts are validated as significant task-pair DIFFERENCES (see validated_contrasts) -- the per-task means themselves are descriptive, not all individually significance-tested pairwise."
+}

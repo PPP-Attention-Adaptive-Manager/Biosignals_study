@@ -1,0 +1,85 @@
+{
+  "hci_schema": [
+    "SnKeyStrokes",
+    "SnChars",
+    "SnSpecialKeys",
+    "SnDirectionKeys",
+    "SnErrorKeys",
+    "SnShortcutKeys",
+    "SnSpaces",
+    "CharactersRatio",
+    "ErrorKeyRatio",
+    "SnLeftClicked",
+    "SnWheel",
+    "SnMouseDistance",
+    "SnMouseAct"
+  ],
+  "input_normalization": {
+    "mean": [
+      0.5980994969256568,
+      0.4209055338177753,
+      0.13974287311347122,
+      0.003912800447177194,
+      0.06539966461710453,
+      0.006148686416992733,
+      0.07434320849636669,
+      0.005695163429016638,
+      0.0011627269953555937,
+      0.0184460592509782,
+      -0.08831749580771381,
+      -59.33705949596748,
+      -0.05312092543531224
+    ],
+    "std": [
+      20.55420016825374,
+      15.67041157327932,
+      4.674722070720777,
+      1.3840447960236744,
+      3.049557899411323,
+      1.1056368526162945,
+      3.133432155559517,
+      0.2216675949863216,
+      0.09226220722930922,
+      1.5124582852220345,
+      34.07923268782862,
+      23826.05337302346,
+      5.20859136823189
+    ]
+  },
+  "targets": {
+    "acc_jerk_direction": {
+      "loso_accuracy": 0.6972887403834824,
+      "empirical_chance": 0.5262930999175022,
+      "over_chance": 0.17099564046598026,
+      "n_folds": 16,
+      "n_classes": 2
+    },
+    "acc_jerk_magnitude": {
+      "loso_accuracy": 0.6591765058272212,
+      "empirical_chance": 0.4808114228615453,
+      "over_chance": 0.17836508296567588,
+      "n_folds": 16,
+      "n_classes": 3
+    },
+    "eeg_engagement_direction": {
+      "loso_accuracy": 0.612267486500461,
+      "empirical_chance": 0.5259257674143987,
+      "over_chance": 0.08634171908606236,
+      "n_folds": 16,
+      "n_classes": 2
+    }
+  },
+  "excluded_confirmed_null": [
+    "resp_bpm_direction",
+    "resp_bpm_magnitude",
+    "eeg_theta_alpha_direction",
+    "eeg_theta_alpha_magnitude",
+    "eeg_alpha_asym_direction",
+    "fnirs_hbo_slope_L_direction",
+    "fnirs_hbo_slope_R_direction",
+    "acc_movement_magnitude",
+    "eeg_engagement_magnitude"
+  ],
+  "validation_scheme": "true per-participant LOSO (LeaveOneGroupOut), not GroupKFold/ShuffleSplit -- confirmed no leakage risk for this exact data/script.",
+  "deployment_note": "HCI-only input. Fires when session detector identifies: single sustained task, no window switching (see session_router.py)."
+}
